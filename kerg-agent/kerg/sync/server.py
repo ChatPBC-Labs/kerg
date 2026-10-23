@@ -66,6 +66,13 @@ class KergSyncServer:
                 asyncio.run_coroutine_threadsafe(ws.send(json.dumps(event)), loop)
 
             agent.engine.add_listener(listener)
+            # race-safety: replay the most recent event so changes made during
+            # the handshake window (listener not yet attached) are never missed
+            history = agent.engine.events_since(0)
+            for past in reversed(history):
+                if past.get("type") == "context_updated":
+                    await ws.send(json.dumps(past))
+                    break
             try:
                 async for _ in ws:
                     pass  # client pings only; pushes go over REST
