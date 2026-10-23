@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kerg"
+version = "0.1.0"
+description = "Kerg - the robot context-layer SDK: owners align their robot instantly via SOUL.md / USER.md pushed from their phone"
+readme = "../README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Kerg Project" }]
+keywords = ["robotics", "context", "llm", "ros2", "personalization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Robotics",
+]
+dependencies = []
+
+[project.optional-dependencies]
+sync = ["websockets>=12"]
+dev = ["pytest>=8", "websockets>=12"]
+
+[project.scripts]
+kerg-agent = "kerg.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/TODO-org-placeholder/kerg"
+Documentation = "https://github.com/TODO-org-placeholder/kerg/tree/main/docs"
+
+[tool.setuptools.packages.find]
+include = ["kerg*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
