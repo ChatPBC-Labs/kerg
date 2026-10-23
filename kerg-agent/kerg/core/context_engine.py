@@ -74,6 +74,7 @@ class ContextEngine:
                 on_rollback = stale.to_text()
             self._docs[layer] = doc
             self._versions[layer] = version
+            doc.meta["version"] = str(version)  # persist across reboots
             try:
                 self._persist(doc)
                 snapshot = self._dispatch(changed=[layer])

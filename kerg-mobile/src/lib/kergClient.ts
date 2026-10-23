@@ -114,26 +114,12 @@ export class KergClient {
   /** Live events (WebSocket). Falls back to polling when ws unavailable. */
   subscribe(onEvent: (e: KergEvent) => void, onContextUpdate?: (prompt: string) => void): () => void {
     let ws: WebSocket | null = null;
-    let timer: ReturnType<typeof setInterval> | null = null;
+    let wsOpen = false;
+    const cleanup: Array<() => void> = [];
     let lastVersions: Record<string, number> = {};
-    const wsUrl = this.robotUrl.replace(/^http/, "ws") + "/ws";
-    try {
-      ws = new WebSocket(wsUrl);
-      ws.onmessage = (ev) => {
-        const data = JSON.parse(ev.data) as KergEvent;
-        if (data.type === "context_updated" && onContextUpdate) {
-          void this.currentContext().then(
-            (c) => onContextUpdate(c.prompt),
-            () => undefined,
-          );
-        }
-        onEvent(data);
-      };
-    } catch {
-      ws = null;
-    }
-    if (!ws) {
-      timer = setInterval(() => {
+
+    const startPolling = () => {
+      const timer = setInterval(() => {
         void this.currentContext()
           .then((c) => {
             if (JSON.stringify(c.versions) !== JSON.stringify(lastVersions)) {
@@ -144,9 +130,40 @@ export class KergClient {
           })
           .catch(() => undefined);
       }, 750);
+      cleanup.push(() => clearInterval(timer));
+    };
+
+    try {
+      ws = new WebSocket(this.robotUrl.replace(/^http/, "ws") + "/ws");
+      // NOTE: use addEventListener — onmessage/onopen legacy accessors are
+      // not reliably implemented in all WebSocket clients (e.g. Node/undici).
+      ws.addEventListener("open", () => {
+        wsOpen = true;
+      });
+      ws.addEventListener("message", (ev: MessageEvent) => {
+        const data = JSON.parse(String(ev.data)) as KergEvent;
+        if (data.type === "context_updated" && onContextUpdate) {
+          void this.currentContext()
+            .then((c) => onContextUpdate(c.prompt), () => undefined);
+        }
+        onEvent(data);
+      });
+      // async handshake failure (robot without ws support) -> polling
+      const grace = setTimeout(() => {
+        if (!wsOpen) {
+          ws?.close();
+          ws = null;
+          startPolling();
+        }
+      }, 600);
+      cleanup.push(() => clearTimeout(grace));
+    } catch {
+      ws = null;
+      startPolling();
     }
+
     return () => {
-      if (timer) clearInterval(timer);
+      cleanup.forEach((fn) => fn());
       ws?.close();
     };
   }
