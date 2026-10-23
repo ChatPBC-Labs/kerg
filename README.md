@@ -64,7 +64,17 @@ cd kerg-mobile && npm i && npm run dev   # open http://localhost:5174
 
 ## Status
 
-v0.1 — tested on Python 3.14 + Node 22; CI matrix 3.11-3.13. Protocol `kerg/0.1`.
-ed25519 device signing, cloud relay and SESSION.md land in v0.2.
+v0.1 — **verification gauntlet: 34/34, three consecutive green runs** on the
+published code (protocol, pairing, signed hot-reload, WS replay, security
+tamper-rejection, fuzz, 10-thread concurrency, reboot persistence).
+
+Re-verify on any machine — this is the project's contract, not a claim:
+
+```bash
+python tests/verify_all.py          # 34 adversarial checks, exit 0 = all holds
+```
+
+CI matrix: Python 3.11-3.13 + Node 22. Currently tested on Python 3.14 / Node 22.
+Protocol `kerg/0.1`. ed25519 device signing, cloud relay and SESSION.md land in v0.2.
 
 Apache-2.0. See [CHANGELOG](CHANGELOG.md) and [CONTRIBUTING](CONTRIBUTING.md).
