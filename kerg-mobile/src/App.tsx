@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { KergClient, KergEvent } from "./lib/kergClient";
+import DemoPage from "./playground/DemoPage";
+
+type Mode = "align" | "playground";
 
 const TEMPLATES: Record<"user" | "soul", string> = {
   user: `---
@@ -29,6 +32,7 @@ export default function App() {
   const [code, setCode] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("soul");
+  const [mode, setMode] = useState<Mode>("playground");
   const [docs, setDocs] = useState<Record<Tab, string>>(TEMPLATES);
   const [events, setEvents] = useState<string[]>([]);
   const [prompt, setPrompt] = useState<string>("(pair with your robot to see live context)");
@@ -93,6 +97,19 @@ export default function App() {
   return (
     <div style={{ maxWidth: 880, margin: "0 auto", fontFamily: "system-ui, sans-serif", padding: 16 }}>
       <h1 style={{ marginBottom: 2 }}>Kerg <span style={{ fontSize: 14, color: "#888" }}>align your robot</span></h1>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+        {(["playground", "align"] as Mode[]).map((m) => (
+          <button key={m} onClick={() => setMode(m)}
+            style={{ fontWeight: mode === m ? "bold" : "normal" }}>
+            {m === "playground" ? "3D Playground" : "Align a real robot"}
+          </button>
+        ))}
+      </div>
+
+      {mode === "playground" ? (
+        <DemoPage />
+      ) : (
+      <>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input value={robotUrl} onChange={(e) => setRobotUrl(e.target.value)} size={28} />
         <button onClick={connect}>Connect</button>
@@ -123,8 +140,10 @@ export default function App() {
         </div>
       </div>
 
-      <h3 style={{ marginBottom: 4 }}>Events</h3>
-      <ul style={{ fontSize: 12, paddingLeft: 16 }}>{events.map((e, i) => <li key={i}>{e}</li>)}</ul>
+        <h3 style={{ marginBottom: 4 }}>Events</h3>
+        <ul style={{ fontSize: 12, paddingLeft: 16 }}>{events.map((e, i) => <li key={i}>{e}</li>)}</ul>
+      </>
+      )}
     </div>
   );
 }
