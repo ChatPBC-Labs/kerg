@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "kerg"
 version = "0.1.0"
 description = "Kerg - the robot context-layer SDK: owners align their robot instantly via SOUL.md / USER.md pushed from their phone"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Kerg Project" }]
