@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kerg · 3D Playground (single file)</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #101318; color: #e6e9ee;
+    font-family: system-ui, sans-serif; padding: 16px;
+  }
+  h1 { margin: 0 0 2px; font-size: 22px; }
+  h1 small { font-size: 13px; color: #8a93a2; font-weight: normal; }
+  #wrap { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; margin-top: 10px; }
+  #left { flex: 0 1 340px; min-width: 300px; display: flex; flex-direction: column; gap: 10px; }
+  #right { flex: 1; min-width: 320px; display: flex; flex-direction: column; gap: 8px; }
+  label b { font-size: 13px; } .hint { font-size: 11px; color: #8a93a2; }
+  pre#robotmd { background: #1b2029; border: 1px solid #2a3140; padding: 6px; font-size: 11px; margin: 4px 0; white-space: pre-wrap; border-radius: 8px; color: #9fb3d1; }
+  textarea {
+    width: 100%; min-height: 110px; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; background: #1b2029; color: #e6e9ee; border: 1px solid #2a3140; border-radius: 8px; padding: 8px;
+  }
+  #stage { flex: 1; min-height: 440px; position: relative; background: #12161c; border-radius: 10px; overflow: hidden; border: 1px solid #2a3140; }
+  canvas { display: block; }
+  #bubble {
+    position: absolute; transform: translate(-50%, -120%); background: #ffffff; color: #1a202c;
+    padding: 6px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; white-space: nowrap;
+    opacity: 0; transition: opacity .25s; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.35);
+  }
+  #actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  button.act {
+    background: #24314a; color: #e6e9ee; border: 1px solid #33507c; border-radius: 8px;
+    padding: 6px 12px; font-size: 13px; cursor: pointer; text-transform: capitalize;
+  }
+  button.act:hover { background: #2d3f60; }
+  button.act.blocked { background: #3a2430; border-color: #7c3350; }
+  .chip { background: #1b2029; border: 1px solid #2a3140; border-radius: 10px; padding: 2px 8px; font-size: 11px; color: #9fb3d1; }
+  #lastmsg { font-size: 12px; min-height: 16px; color: #58b46a; }
+  #lastmsg.bad { color: #e07a70; }
+  #log { font-size: 11px; padding-left: 14px; margin: 0; max-height: 150px; overflow-y: auto; width: 100%; }
+  #log b.ok { color: #58b46a; } #log b.no { color: #e07a70; }
+  #log li { margin-bottom: 3px; }
+  details { font-size: 11px; color: #8a93a2; }
+  summary { cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1>Kerg <small>3D Playground · single-file demo · the SAME rule engine as the robot SDK</small></h1>
+
+  <div id="wrap">
+    <div id="left">
+      <div>
+        <b>ROBOT.md</b> <span class="hint">manufacturer layer · read-only, owner cannot change</span>
+        <pre id="robotmd"></pre>
+      </div>
+      <div>
+        <b>SOUL.md</b>
+        <textarea id="soul"></textarea>
+      </div>
+      <div>
+        <b>USER.md</b>
+        <textarea id="user"></textarea>
+      </div>
+    </div>
+
+    <div id="right">
+      <div id="stage"><div id="bubble"></div></div>
+      <div id="actions"></div>
+      <div style="display:flex;gap:4px;margin-left:auto;flex-wrap:wrap" id="chips"></div>
+      <div id="lastmsg"></div>
+      <ul id="log"></ul>
+      <details>
+        <summary>The safety proof (2 clicks)</summary>
+        <ol style="margin:4px 0">
+          <li>Press <i>kitchen</i> → blocked: ROBOT.md forbids the kitchen.</li>
+          <li>Edit USER.md to add &ldquo;Please help me in the kitchen&rdquo; and press <i>kitchen</i> again → <b>still blocked</b>. Owners own personality; manufacturers own safety.</li>
+        </ol>
+      </details>
+    </div>
+  </div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+/* ----------------------------- Kerg rule engine --------------------------- */
+/* Deterministic interpretation of the context stack (ROBOT > SOUL > USER).
+   Same documents -> same behavior, every time. No LLM, no randomness.       */
+
+const DEFAULT_ROBOT_MD = `---
+robot_id: demo-unit-0001
+model: Home Gen-1
+manufacturer: Demo Robotics
+safety_locked: "true"
+deny_patterns: weapon, illegal
+---
+# ROBOT.md
+- The emergency stop is always available and always wins.
+- Never enter the kitchen unless the user explicitly asks for help there.
+- No medical, legal or financial advice.
+`;
+
+const TEMPLATES = {
+  soul: `---
+name: Nova
+tone: calm
+speed: slow
+---
+# SOUL.md
+You are Nova, this household's robot.
+
+## Rules
+- Never shout indoors.
+- Wake us gently in the mornings.`,
+  user: `---
+name: Alex
+accessibility: hard of hearing - face me, speak slowly
+preferences: vegan meals, jazz, EV charging
+---
+# USER.md
+Facts about me. Update whenever my life changes.`,
+};
+
+const ACTIONS = ["wave", "walk", "sit", "dance", "speak", "pick", "kitchen"];
+const BASE_MS = { wave: 1600, walk: 4000, sit: 1600, dance: 3000, speak: 2200, pick: 2400, kitchen: 3000 };
+const SPEED_FACTOR = { slow: 0.6, normal: 1.0, fast: 1.6 };
+
+function parseFrontmatter(text) {
+  const src = text.split("\n");
+  const meta = {};
+  let i = 0;
+  if (src.length && src[0].trim() === "---") {
+    i = 1;
+    for (; i < src.length; i++) {
+      const s = src[i].trim();
+      if (s === "---") { i += 1; break; }
+      const idx = s.indexOf(":");
+      if (idx > 0) meta[s.slice(0, idx).trim()] = s.slice(idx + 1).trim();
+    }
+  }
+  return meta;
+}
+
+function bodyOf(text) {
+  const lines = text.split("\n");
+  if (lines.length && lines[0].trim() === "---") {
+    for (let i = 1; i < lines.length; i++)
+      if (lines[i].trim() === "---") return lines.slice(i + 1).join("\n").trim();
+  }
+  return text.trim();
+}
+
+function rulesOf(body) {
+  return body.split("\n").map((l) => l.trim())
+    .filter((l) => l.startsWith("- ") || l.startsWith("* "))
+    .map((l) => l.slice(2).trim());
+}
+
+function parseContext(documents) {
+  const robotText = documents["robot"] ?? "";
+  const soulText = documents["soul"] ?? "";
+  const userText = documents["user"] ?? "";
+  const robotMeta = parseFrontmatter(robotText);
+  const soulMeta = parseFrontmatter(soulText);
+  const userMeta = parseFrontmatter(userText);
+  const deny = (robotMeta["deny_patterns"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const speedRaw = (soulMeta["speed"] ?? "normal").toLowerCase();
+  const speed = speedRaw === "slow" || speedRaw === "fast" ? speedRaw : "normal";
+  const userBody = bodyOf(userText);
+  const accessible =
+    /accessib|hard of hear|deaf|hearing|face me|wheelchair|blind|seeing/i.test(userBody + " " + (userMeta["accessibility"] ?? ""));
+  let name = userMeta["name"] ?? "";
+  if (!name) { const m = userBody.match(/(?:i am|i'm|call me)\s+([A-Z][a-z]+)/); name = m ? m[1] : ""; }
+  return {
+    robot: { body: bodyOf(robotText), denyPatterns: deny, constitution: rulesOf(bodyOf(robotText)) },
+    soul: { name: soulMeta["name"] ?? "", tone: soulMeta["tone"] ?? "", speed, rules: rulesOf(bodyOf(soulText)) },
+    user: { name, body: userBody, accessibility: accessible },
+  };
+}
+
+function speakBubble(ctx) {
+  const to = ctx.user.name || "you";
+  const tone = ctx.soul.tone.toLowerCase();
+  if (tone.includes("energetic") || ctx.soul.speed === "fast") return `Hey ${to}! Great to see you!`;
+  if (tone.includes("formal")) return `Hello ${to}. How may I assist?`;
+  return `Good morning, ${to}. All is well.`;
+}
+
+function decide(action, ctx) {
+  const reason = [];
+  const speedFactor = SPEED_FACTOR[ctx.soul.speed] ?? 1.0;
+  let durationMs = Math.round(BASE_MS[action] / speedFactor);
+  let allowed = true;
+  let bubble;
+
+  if (action === "kitchen") {
+    const ask = /enter the kitchen|help (me )?in the kitchen|kitchen help allowed/i.test(ctx.user.body);
+    if (ask) {
+      reason.push("allowed: USER.md explicitly asks for kitchen help");
+    } else {
+      allowed = false;
+      const rule = ctx.robot.constitution.find((r) => /kitchen/i.test(r)) ?? "ROBOT.md kitchen rule";
+      reason.push(`BLOCKED by manufacturer constitution: \u201C${rule}\u201D`);
+      reason.push("hint: owners cannot override ROBOT.md \u2014 Kerg enforces safety first");
+      durationMs = 0;
+    }
+  }
+  for (const p of ctx.robot.denyPatterns) {
+    if (p && new RegExp(p, "i").test(action)) {
+      allowed = false;
+      reason.push(`denied by deny_pattern /${p}/`);
+    }
+  }
+  if (allowed && action === "speak") {
+    bubble = speakBubble(ctx);
+    reason.push(`SOUL.md: tone="${ctx.soul.tone}", speed="${ctx.soul.speed}" \u2192 bubble composed`);
+    if (ctx.soul.rules.some((r) => /shout|loud/i.test(r)))
+      reason.push("SOUL.md rule \u201Cno shouting\u201D respected (gentle voice)");
+  }
+  if (ctx.soul.speed !== "normal")
+    reason.push(`SOUL.md: speed=${ctx.soul.speed} \u2192 animation ${Math.round(speedFactor * 100)}%`);
+  if (ctx.user.accessibility)
+    reason.push("USER.md accessibility \u2192 robot faces the owner while acting/speaking");
+  if (allowed) reason.push("approved by merged context (ROBOT > SOUL > USER)");
+  return { action, allowed, reason, speedFactor, durationMs, bubble, faceUser: ctx.user.accessibility };
+}
+
+/* ------------------------------ 3D scene --------------------------------- */
+
+function buildRoom() {
+  const room = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x9c7c52, roughness: 0.85 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x47505c, roughness: 0.95 });
+  const sofaMat = new THREE.MeshStandardMaterial({ color: 0x516c6d, roughness: 0.9 });
+  const cushionMat = new THREE.MeshStandardMaterial({ color: 0x6c8a8c, roughness: 0.95 });
+  const woodDark = new THREE.MeshStandardMaterial({ color: 0x6b4f2a, roughness: 0.8 });
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), wood);
+  floor.rotation.x = -Math.PI / 2;
+  room.add(floor);
+
+  const rug = new THREE.Mesh(new THREE.CircleGeometry(1.7, 40),
+    new THREE.MeshStandardMaterial({ color: 0x775e50, roughness: 1 }));
+  rug.rotation.x = -Math.PI / 2;
+  rug.position.y = 0.006;
+  room.add(rug);
+
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(9, 3.2), wallMat);
+  wall.position.set(0, 1.6, -4);
+  room.add(wall);
+  const sideWall = new THREE.Mesh(new THREE.PlaneGeometry(9, 3.2), wallMat);
+  sideWall.position.set(-4.5, 1.6, 0.5);
+  sideWall.rotation.y = Math.PI / 2;
+  room.add(sideWall);
+
+  const sofa = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.42, 0.95), sofaMat);
+  base.position.y = 0.21; sofa.add(base);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.7, 0.22), sofaMat);
+  back.position.set(0, 0.7, -0.38); sofa.add(back);
+  for (let i = 0; i < 3; i++) {
+    const cu = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.16, 0.78), cushionMat);
+    cu.position.set(-0.74 + i * 0.74, 0.5, -0.05); sofa.add(cu);
+  }
+  sofa.position.set(-2.9, 0, -1.4);
+  sofa.rotation.y = Math.PI / 2.6;
+  room.add(sofa);
+
+  const table = new THREE.Group();
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.07, 0.75), woodDark);
+  top.position.y = 0.44; table.add(top);
+  for (const [lx, lz] of [[-0.52, -0.28], [0.52, -0.28], [-0.52, 0.28], [0.52, 0.28]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.42), woodDark);
+    leg.position.set(lx, 0.21, lz); table.add(leg);
+  }
+  const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.1),
+    new THREE.MeshStandardMaterial({ color: 0xc25050 }));
+  mug.position.set(0.28, 0.53, 0.05); table.add(mug);
+  table.position.set(-0.6, 0, -2.35);
+  room.add(table);
+
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.1, 0.22),
+    new THREE.MeshStandardMaterial({ color: 0xa4713d, roughness: 0.9 }));
+  pot.position.set(2.4, 0.11, -2.6); room.add(pot);
+  const bush = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.55, 12),
+    new THREE.MeshStandardMaterial({ color: 0x3e7d4e, roughness: 0.9 }));
+  bush.position.set(2.4, 0.5, -2.6); room.add(bush);
+
+  return room;
+}
+
+function buildRobot(scene) {
+  const skin = new THREE.MeshStandardMaterial({ color: 0xdfe6ee, metalness: 0.35, roughness: 0.35 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2b3441, metalness: 0.5, roughness: 0.4 });
+  const jointMat = new THREE.MeshStandardMaterial({ color: 0x7f8ea3, metalness: 0.6, roughness: 0.3 });
+  const mesh = (geo, mat) => new THREE.Mesh(geo, mat);
+  const limb = (len, r, mat) => {
+    const pivot = new THREE.Group();
+    const m = mesh(new THREE.CapsuleGeometry(r, len, 4, 10), mat);
+    m.position.y = -len / 2 - r;
+    pivot.add(m);
+    return pivot;
+  };
+
+  const robot = new THREE.Group();
+  const body = new THREE.Group();
+  robot.add(body);
+
+  const torso = mesh(new THREE.CapsuleGeometry(0.24, 0.5, 6, 16), skin);
+  torso.position.y = 1.06; body.add(torso);
+  const chest = mesh(new THREE.BoxGeometry(0.34, 0.26, 0.12), dark);
+  chest.position.set(0, 1.14, 0.14); body.add(chest);
+
+  const head = new THREE.Group();
+  head.position.y = 1.5;
+  const skull = mesh(new THREE.SphereGeometry(0.17, 20, 16), skin);
+  skull.scale.set(1, 1.08, 0.94); head.add(skull);
+  for (const sx of [-1, 1]) {
+    const eye = mesh(new THREE.SphereGeometry(0.032, 10, 10), new THREE.MeshBasicMaterial({ color: 0x0b0f14 }));
+    eye.position.set(0.065 * sx, 0.03, 0.145); head.add(eye);
+  }
+  const antenna = mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.09), jointMat);
+  antenna.position.y = 0.2; head.add(antenna);
+  body.add(head);
+
+  const joints = { head, body };
+  for (const side of ["L", "R"]) {
+    const sx = side === "L" ? -1 : 1;
+
+    const shoulder = new THREE.Group();
+    shoulder.position.set(0.3 * sx, 1.3, 0);
+    body.add(shoulder);
+    shoulder.add(mesh(new THREE.SphereGeometry(0.075, 12, 10), jointMat));
+    const upper = limb(0.24, 0.05, skin);
+    shoulder.add(upper);
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.34; upper.add(elbow);
+    const fore = limb(0.22, 0.045, skin);
+    elbow.add(fore);
+    const hand = mesh(new THREE.SphereGeometry(0.055, 10, 8), dark);
+    hand.position.y = -0.315; fore.add(hand);
+
+    const hip = new THREE.Group();
+    hip.position.set(0.13 * sx, 0.78, 0);
+    body.add(hip);
+    const thigh = limb(0.3, 0.06, skin);
+    hip.add(thigh);
+    const knee = new THREE.Group();
+    knee.position.y = -0.42; thigh.add(knee);
+    const shin = limb(0.28, 0.05, skin);
+    knee.add(shin);
+    const foot = mesh(new THREE.BoxGeometry(0.11, 0.06, 0.2), dark);
+    foot.position.set(0, -0.36, 0.04); shin.add(foot);
+
+    joints["shoulder" + side] = shoulder;
+    joints["elbow" + side] = elbow;
+    joints["hip" + side] = hip;
+    joints["knee" + side] = knee;
+  }
+  scene.add(robot);
+  return { robot, joints, body, head };
+}
+
+/* ------------------------------ app state -------------------------------- */
+
+const soulEl = document.getElementById("soul");
+const userEl = document.getElementById("user");
+const lastEl = document.getElementById("lastmsg");
+const logEl = document.getElementById("log");
+const chipsEl = document.getElementById("chips");
+document.getElementById("robotmd").textContent = DEFAULT_ROBOT_MD;
+soulEl.value = TEMPLATES.soul;
+userEl.value = TEMPLATES.user;
+
+const bubbleEl = document.getElementById("bubble");
+function setBubble(text) {
+  bubbleEl.textContent = text ?? "";
+  bubbleEl.style.opacity = text ? "1" : "0";
+}
+
+/* ------------------------- three.js bootstrap ---------------------------- */
+
+const stage = document.getElementById("stage");
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x12161c);
+scene.fog = new THREE.Fog(0x12161c, 9, 17);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 40);
+camera.position.set(2.7, 1.9, 4.4);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+stage.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
+sun.position.set(2.5, 4.5, 3);
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
+fill.position.set(-3, 2, -1);
+scene.add(fill);
+
+scene.add(buildRoom());
+const { robot, joints, body: bodyJ, head: headJ } = buildRobot(scene);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1, 0);
+controls.enableDamping = true;
+controls.minDistance = 2.5;
+controls.maxDistance = 9;
+controls.maxPolarAngle = Math.PI / 2 - 0.03;
+
+function resize() {
+  const w = stage.clientWidth || 640;
+  const h = stage.clientHeight || 440;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+resize();
+new ResizeObserver(resize).observe(stage);
+
+/* ---------------------------- animation loop ----------------------------- */
+
+let pose = { mode: "idle" };
+const bubbleAnchor = new THREE.Vector3();
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const ease = (t) => t * t * (3 - 2 * t);
+let last = performance.now();
+
+function play(action, opts) {
+  pose = {
+    mode: "running", action, prog: 0,
+    durationMs: Math.max(200, opts.durationMs || 1500),
+    speedFactor: opts.speedFactor || 1,
+    faceUser: !!opts.faceUser,
+  };
+  setBubble(opts.bubble ?? null);
+}
+window.poke = play;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+
+  // neutral pose every frame (no drift)
+  for (const k of Object.keys(joints)) if (k !== "body" && k !== "head") joints[k].rotation.set(0, 0, 0);
+  robot.position.set(0, 0, 0);
+  bodyJ.rotation.set(0, 0, 0);
+  headJ.rotation.set(0, 0, 0);
+
+  // idle breathing + wandering gaze
+  const t = now / 1000;
+  const breathe = Math.sin(t * 1.6) * 0.5 + 0.5;
+  bodyJ.position.y = 0.008 * breathe;
+  joints.shoulderL.rotation.z = 0.08 + 0.02 * breathe;
+  joints.shoulderR.rotation.z = -0.08 - 0.02 * breathe;
+  headJ.rotation.y = Math.sin(t * 0.4) * 0.12;
+
+  if (pose.mode === "running") {
+    pose.prog += (dt * 1000 * pose.speedFactor) / Math.max(1, pose.durationMs);
+    const p = clamp(pose.prog, 0, 1);
+    const q = ease(p);
+    switch (pose.action) {
+      case "wave": {
+        joints.shoulderR.rotation.z = -2.05 * q;
+        joints.elbowR.rotation.z = -0.5 * q + Math.sin(p * Math.PI * 5) * 0.55 * q;
+        headJ.rotation.z = 0.12 * q;
+        if (pose.faceUser) headJ.rotation.y = 0.5 * q;
+        break;
+      }
+      case "walk": {
+        const ph = p * Math.PI * 6;
+        joints.hipL.rotation.x = Math.sin(ph) * 0.5 * q;
+        joints.hipR.rotation.x = -Math.sin(ph) * 0.5 * q;
+        joints.kneeL.rotation.x = Math.max(0, Math.sin(ph - 0.9)) * 0.7 * q;
+        joints.kneeR.rotation.x = Math.max(0, Math.sin(ph - 0.9 + Math.PI)) * 0.7 * q;
+        joints.shoulderL.rotation.x = -Math.sin(ph) * 0.45 * q;
+        joints.shoulderR.rotation.x = Math.sin(ph) * 0.45 * q;
+        bodyJ.position.y = Math.abs(Math.sin(ph)) * 0.04 * q;
+        break;
+      }
+      case "sit": {
+        joints.hipL.rotation.x = 1.35 * q;
+        joints.hipR.rotation.x = 1.35 * q;
+        joints.kneeL.rotation.x = -1.75 * q;
+        joints.kneeR.rotation.x = -1.75 * q;
+        bodyJ.position.y = -0.36 * q;
+        bodyJ.rotation.x = 0.1 * q;
+        joints.shoulderL.rotation.x = 0.25 * q;
+        joints.shoulderR.rotation.x = 0.25 * q;
+        joints.elbowL.rotation.x = -0.6 * q;
+        joints.elbowR.rotation.x = -0.6 * q;
+        break;
+      }
+      case "dance": {
+        const dph = p * Math.PI * 4;
+        bodyJ.rotation.y = Math.sin(dph) * 0.35 * q;
+        bodyJ.position.y = Math.abs(Math.sin(dph * 2)) * 0.05 * q;
+        joints.shoulderL.rotation.z = 2.1 + Math.sin(dph) * 0.35;
+        joints.shoulderR.rotation.z = -2.1 - Math.sin(dph + Math.PI) * 0.35;
+        headJ.rotation.z = Math.sin(dph) * 0.18 * q;
+        break;
+      }
+      case "speak": {
+        headJ.rotation.x = Math.sin(p * Math.PI * 5) * 0.09 * q;
+        bodyJ.rotation.y = Math.sin(t * 1.2) * 0.06;
+        if (pose.faceUser) headJ.rotation.y = 0.45 * q;
+        break;
+      }
+      case "pick": {
+        const reach = Math.sin(p * Math.PI);
+        bodyJ.rotation.x = 0.3 * reach * q;
+        joints.shoulderR.rotation.x = -1.25 * reach * q;
+        joints.shoulderR.rotation.z = -0.25 * reach * q;
+        joints.elbowR.rotation.x = -0.55 * reach * q + 0.3;
+        bodyJ.position.y = -0.08 * reach * q;
+        break;
+      }
+      case "kitchen": {
+        const ph = p * Math.PI * 6;
+        joints.hipL.rotation.x = Math.sin(ph) * 0.45 * q;
+        joints.hipR.rotation.x = -Math.sin(ph) * 0.45 * q;
+        joints.shoulderL.rotation.x = -Math.sin(ph) * 0.4 * q;
+        joints.shoulderR.rotation.x = Math.sin(ph) * 0.4 * q;
+        break;
+      }
+    }
+    if (pose.prog >= 1) {
+      pose = { mode: "idle" };
+      setBubble(null);
+    }
+  }
+
+  // bubble anchored to the head
+  if (bubbleEl.style.opacity === "1") {
+    bubbleAnchor.set(0, 1.98, 0).applyMatrix4(robot.matrixWorld);
+    bubbleAnchor.project(camera);
+    bubbleEl.style.left = (bubbleAnchor.x * 0.5 + 0.5) * 100 + "%";
+    bubbleEl.style.top = (-bubbleAnchor.y * 0.5 + 0.5) * 100 + "%";
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ------------------------------- UI layer -------------------------------- */
+
+let entryId = 1;
+function currentCtx() {
+  return parseContext({ robot: DEFAULT_ROBOT_MD, soul: soulEl.value, user: userEl.value });
+}
+
+function refreshChips(ctx) {
+  const pct = Math.round((SPEED_FACTOR[ctx.soul.speed] ?? 1) * 100);
+  chipsEl.innerHTML = "";
+  for (const txt of [
+    `persona: ${ctx.soul.name || "(unnamed)"}`,
+    `tone: ${ctx.soul.tone || "(none)"}`,
+    `speed: ${ctx.soul.speed} (${pct}%)`,
+    ctx.user.accessibility ? `faces ${ctx.user.name || "owner"}` : "no accessibility flags",
+  ]) {
+    const c = document.createElement("span");
+    c.className = "chip";
+    c.textContent = txt;
+    chipsEl.appendChild(c);
+  }
+}
+
+function fire(action) {
+  const ctx = currentCtx();
+  const d = decide(action, ctx);
+  const li = document.createElement("li");
+  const b = document.createElement("b");
+  b.className = d.allowed ? "ok" : "no";
+  b.style.textTransform = "capitalize";
+  b.textContent = action;
+  li.appendChild(b);
+  li.appendChild(document.createTextNode(" " + (d.allowed ? "allowed" : "blocked") + " — " + d.reason.join(" · ")));
+  logEl.prepend(li);
+  while (logEl.children.length > 14) logEl.removeChild(logEl.lastChild);
+
+  lastEl.classList.toggle("bad", !d.allowed);
+  if (d.allowed) {
+    const pct = Math.round((SPEED_FACTOR[ctx.soul.speed] ?? 1) * 100);
+    lastEl.textContent = `${action} approved at ${pct}% speed`;
+    play(action, { durationMs: d.durationMs, speedFactor: d.speedFactor, bubble: d.bubble, faceUser: d.faceUser });
+  } else {
+    lastEl.textContent = `${action} BLOCKED by the robot's constitution`;
+  }
+}
+
+const actionsEl = document.getElementById("actions");
+for (const a of ACTIONS) {
+  const btn = document.createElement("button");
+  btn.className = "act";
+  btn.textContent = a;
+  btn.onclick = () => fire(a);
+  actionsEl.appendChild(btn);
+}
+
+function refresh() { refreshChips(currentCtx()); }
+soulEl.oninput = refresh;
+userEl.oninput = refresh;
+refresh();
+</script>
+</body>
+</html>
