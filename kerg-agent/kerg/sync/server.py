@@ -129,7 +129,11 @@ class _Handler(BaseHTTPRequestHandler):
         kerg: KergSyncServer = self.server.kerg
         path = urllib.parse.urlparse(self.path).path
         if path in ("/status", "/", "/health"):
-            _json(self, 200, {**kerg.agent.engine.status(), "ws_available": HAS_WS})
+            status = {**kerg.agent.engine.status(), "ws_available": HAS_WS}
+            if HAS_WS and kerg._ws_port_actual:
+                host_header = self.headers.get("Host", "").split(":")[0] or "127.0.0.1"
+                status["ws_url"] = f"ws://{host_header}:{kerg._ws_port_actual}"
+            _json(self, 200, status)
         elif path == "/context":
             snap = kerg.agent.engine.snapshot()
             _json(self, 200, {

@@ -64,6 +64,7 @@ export async function signPayload(
 
 export class KergClient {
   robotUrl: string;
+  private _lastStatus: Record<string, unknown> | null = null;
 
   constructor(robotUrl: string) {
     this.robotUrl = robotUrl.replace(/\/+$/, "");
@@ -103,7 +104,19 @@ export class KergClient {
 
   async status(): Promise<Record<string, unknown>> {
     const resp = await fetch(`${this.robotUrl}/status`);
-    return (await resp.json()) as Record<string, unknown>;
+    const data = (await resp.json()) as Record<string, unknown>;
+    this._lastStatus = data;
+    return data;
+  }
+
+  private async wsUrl(): Promise<string | null> {
+    if (this._lastStatus?.ws_url) return String(this._lastStatus.ws_url);
+    try {
+      const s = (await this.status()) as any;
+      return s.ws_url ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async currentContext(): Promise<{ prompt: string; versions: Record<string, number> }> {
@@ -113,10 +126,9 @@ export class KergClient {
 
   /** Live events (WebSocket). Falls back to polling when ws unavailable. */
   subscribe(onEvent: (e: KergEvent) => void, onContextUpdate?: (prompt: string) => void): () => void {
-    let ws: WebSocket | null = null;
-    let wsOpen = false;
     const cleanup: Array<() => void> = [];
     let lastVersions: Record<string, number> = {};
+    let ws: WebSocket | null = null;
 
     const startPolling = () => {
       const timer = setInterval(() => {
@@ -133,10 +145,15 @@ export class KergClient {
       cleanup.push(() => clearInterval(timer));
     };
 
-    try {
-      ws = new WebSocket(this.robotUrl.replace(/^http/, "ws") + "/ws");
-      // NOTE: use addEventListener — onmessage/onopen legacy accessors are
-      // not reliably implemented in all WebSocket clients (e.g. Node/undici).
+    let wsOpen = false;
+    const connect = async () => {
+      // Robot advertises its real WS endpoint via /status.ws_url; without
+      // the sync extra installed we get null and fall back to polling.
+      const resolved = await this.wsUrl();
+      if (!resolved) return startPolling();
+      ws = new WebSocket(resolved);
+      // NOTE: addEventListener, not onopen/onmessage accessors — not all
+      // implementations (Node/undici) honor those.
       ws.addEventListener("open", () => {
         wsOpen = true;
       });
@@ -148,7 +165,7 @@ export class KergClient {
         }
         onEvent(data);
       });
-      // async handshake failure (robot without ws support) -> polling
+      // async handshake failure -> polling within the grace window
       const grace = setTimeout(() => {
         if (!wsOpen) {
           ws?.close();
@@ -157,10 +174,13 @@ export class KergClient {
         }
       }, 600);
       cleanup.push(() => clearTimeout(grace));
-    } catch {
-      ws = null;
-      startPolling();
-    }
+      ws.addEventListener("error", () => {
+        if (!wsOpen) {
+          startPolling();
+        }
+      });
+    };
+    void connect().catch(() => startPolling());
 
     return () => {
       cleanup.forEach((fn) => fn());
