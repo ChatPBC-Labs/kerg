@@ -14,7 +14,7 @@ pip install kerg            # from PyPI or your internal mirror
 Or vendor the source into your image (it is pure stdlib):
 
 ```bash
-pip install git+https://github.com/TODO-org-placeholder/kerg#subdirectory=kerg-agent
+pip install git+https://github.com/qfg5182-ui/kerg#subdirectory=kerg-agent
 ```
 
 Optional extras:

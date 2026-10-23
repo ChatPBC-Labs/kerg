@@ -53,7 +53,7 @@ audited ([security model](docs/SECURITY.md)).
 ## Quickstart (manufacturer's machine)
 
 ```bash
-git clone https://github.com/TODO-org-placeholder/kerg && cd kerg
+git clone https://github.com/qfg5182-ui/kerg && cd kerg
 python -m venv .venv && .venv/Scripts/pip install -e kerg-agent[dev]   # POSIX: .venv/bin/pip
 .venv/Scripts/python examples/tesla_demo/run_tesla_demo.py            # full acceptance run
 
