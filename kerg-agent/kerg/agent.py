@@ -51,6 +51,9 @@ class KergAgent:
               ws_port: int = WS_PORT_DEFAULT, block: bool = False):
         self._server = KergSyncServer(self, host=host, rest_port=rest_port, ws_port=ws_port)
         self._server.start(blocking=block)
+        # deterministic start: REST is already serving; wait for the ws bind
+        # (if any) so /status always advertises ws_url once start() returns
+        self._server._ws_bound.wait(timeout=2.0)
         return self._server
 
     def stop(self) -> None:
